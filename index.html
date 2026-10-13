@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mmecute</title>
+  <meta name="description" content="Mmecute: relaxing mahjong solitaire with big, easy-to-read tiles.">
+  <meta name="theme-color" content="#1f6f5c">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 10 10%27%3E%3Crect width=%2710%27 height=%2710%27 fill=%27%231f6f5c%27/%3E%3Ctext x=%275%27 y=%277.6%27 font-size=%277%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27 font-weight=%27bold%27%3EM%3C/text%3E%3C/svg%3E">
+  <style>
+:root {
+  --felt: #1f6f5c;
+  --felt-dark: #154c3f;
+  --tile: #fbf6e6;
+  --tile-edge: #d8cba3;
+  --tile-side: #b9a974;
+  --ink: #222;
+  --sel: #ffd84a;
+  --hint: #5ad1ff;
+  --red: #c0272d;
+  --green: #1d7a3a;
+  --blue: #1f4fa3;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: radial-gradient(circle at 50% 30%, var(--felt), var(--felt-dark));
+  color: #fff; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; }
+.bar h1 { margin: 0; font-size: 1.4rem; letter-spacing: .04em; }
+.stats { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+
+#stage { flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+#board { position: relative; }
+
+.tile {
+  position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--tile); color: var(--ink);
+  border: 1px solid var(--tile-edge); border-radius: 18%/14%;
+  box-shadow: calc(var(--d) * -1) var(--d) 0 var(--tile-side), calc(var(--d) * -1) var(--d) calc(var(--d) * 1.2) rgba(0,0,0,.35);
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+  font-weight: 700; line-height: 1; transition: transform .08s, opacity .2s;
+}
+.tile .big { font-size: var(--fs); }
+.tile .small { font-size: calc(var(--fs) * .55); margin-top: .1em; }
+.tile.blocked { filter: brightness(.82) saturate(.8); cursor: default; }
+.tile.selected { outline: 3px solid var(--sel); transform: translateY(-3px); z-index: 9999 !important; }
+.tile.hint { outline: 3px dashed var(--hint); animation: pulse .7s infinite alternate; }
+.tile.gone { opacity: 0; transform: scale(.7); pointer-events: none; }
+@keyframes pulse { to { transform: translateY(-3px); } }
+
+.characters { color: var(--red); }
+.bamboo { color: var(--green); }
+.circles { color: var(--blue); }
+.wind { color: #222; }
+.dragon-red { color: var(--red); }
+.dragon-green { color: var(--green); }
+.dragon-white .big { border: .08em solid var(--blue); padding: .1em .2em; color: var(--blue); }
+.flower { color: #b0306e; background: #fff0f6; }
+.season { color: #7a4a00; background: #fff6df; }
+.hc .tile { background: #fff; border-color: #000; }
+.hc .characters, .hc .dragon-red { color: #b00010; }
+.hc .bamboo, .hc .dragon-green { color: #006a1f; }
+.hc .circles { color: #0030a0; }
+
+.controls { display: flex; gap: 8px; padding: 10px 12px 14px; justify-content: center; flex-wrap: wrap; }
+button {
+  font: inherit; font-size: 1.05rem; font-weight: 600; min-height: 48px; padding: 0 18px;
+  border: 0; border-radius: 12px; background: #ffd84a; color: #2b2300; cursor: pointer;
+}
+button:disabled { opacity: .45; cursor: default; }
+button.ghost { background: transparent; color: inherit; border: 1px solid #8887; }
+
+dialog { border: 0; border-radius: 16px; padding: 22px; max-width: min(92vw, 420px); background: #fff; color: #222; }
+dialog::backdrop { background: rgba(0,0,0,.55); }
+dialog h2 { margin-top: 0; }
+dialog label { display: block; margin: 10px 0; font-weight: 600; }
+dialog select { display: block; width: 100%; min-height: 44px; font: inherit; margin-top: 4px; }
+dialog .check { display: flex; gap: 8px; align-items: center; }
+dialog .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.best { font-size: .9rem; color: #555; }
+</style>
+</head>
+<body>
+  <header class="bar">
+    <h1>Mmecute</h1>
+    <div class="stats"><span id="timer">0:00</span> · <span id="left">144</span> tiles</div>
+  </header>
+
+  <main id="stage"><div id="board" aria-label="Mahjong board"></div></main>
+
+  <nav class="controls">
+    <button id="undo">Undo</button>
+    <button id="hint">Hint</button>
+    <button id="shuffle">Shuffle</button>
+    <button id="menu">New game</button>
+  </nav>
+
+  <dialog id="dlg">
+    <form method="dialog" id="dlgForm">
+      <h2 id="dlgTitle">New game</h2>
+      <p id="dlgMsg"></p>
+      <label>Layout
+        <select id="layout"></select>
+      </label>
+      <label class="check"><input type="checkbox" id="contrast"> High-contrast tiles</label>
+      <div class="row">
+        <button value="daily" id="daily">Daily puzzle</button>
+        <button value="random" id="random">Random game</button>
+        <button value="close" class="ghost">Close</button>
+      </div>
+      <p class="best" id="best"></p>
+    </form>
+  </dialog>
+
+  <script>
+// Mmecute game engine: pure logic, no DOM. Runs in browser and Node.
+
+// ---------- Seeded RNG ----------
+function hashString(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffle(arr, rng) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ---------- Faces ----------
+// Each face: { id, label, sub, suit, match }. `match` is the key tiles are paired by.
+const NUM = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const FACES = [];
+function add(face) { FACES.push({ id: FACES.length, ...face }); }
+
+NUM.forEach((n) => add({ label: n, sub: '萬', suit: 'characters', copies: 4 }));
+NUM.forEach((n) => add({ label: n, sub: '索', suit: 'bamboo', copies: 4 }));
+NUM.forEach((n) => add({ label: n, sub: '筒', suit: 'circles', copies: 4 }));
+['東', '南', '西', '北'].forEach((c) => add({ label: c, sub: '', suit: 'wind', copies: 4 }));
+add({ label: '中', sub: '', suit: 'dragon-red', copies: 4 });
+add({ label: '發', sub: '', suit: 'dragon-green', copies: 4 });
+add({ label: '白', sub: '', suit: 'dragon-white', copies: 4 });
+['梅', '蘭', '菊', '竹'].forEach((c) => add({ label: c, sub: '花', suit: 'flower', copies: 1 }));
+['春', '夏', '秋', '冬'].forEach((c) => add({ label: c, sub: '季', suit: 'season', copies: 1 }));
+
+// Flowers match any flower, seasons match any season.
+for (const f of FACES) {
+  f.match = f.suit === 'flower' ? 'flower' : f.suit === 'season' ? 'season' : 'f' + f.id;
+}
+
+function facesMatch(faceA, faceB) {
+  return FACES[faceA].match === FACES[faceB].match;
+}
+
+// The full 144-tile set as an array of face ids.
+function fullSet() {
+  const out = [];
+  for (const f of FACES) for (let i = 0; i < f.copies; i++) out.push(f.id);
+  return out;
+}
+
+// ---------- Layouts ----------
+// Positions are { x, y, z } in half-tile units. A tile covers a 2x2 area.
+function rect(z, x0, x1, y0, y1) {
+  const out = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) out.push({ x: x * 2, y: y * 2, z });
+  return out;
+}
+
+function turtle() {
+  const p = [];
+  p.push(...rect(0, 0, 11, 0, 0));
+  p.push(...rect(0, 2, 9, 1, 1));
+  p.push(...rect(0, 1, 10, 2, 2));
+  p.push(...rect(0, 0, 11, 3, 4));
+  p.push(...rect(0, 1, 10, 5, 5));
+  p.push(...rect(0, 2, 9, 6, 6));
+  p.push(...rect(0, 0, 11, 7, 7));
+  p.push({ x: -2, y: 7, z: 0 }, { x: 24, y: 7, z: 0 }, { x: 26, y: 7, z: 0 });
+  p.push(...rect(1, 3, 8, 1, 6));
+  p.push(...rect(2, 4, 7, 2, 5));
+  p.push(...rect(3, 5, 6, 3, 4));
+  p.push({ x: 11, y: 7, z: 4 });
+  return p;
+}
+
+function pyramid() {
+  const p = [];
+  p.push(...rect(0, 0, 11, 0, 7)); // 96
+  p.push(...rect(1, 2, 9, 1, 6)); // 48 -> 144
+  return p;
+}
+
+function rows() {
+  // Gentle starter board, 72 tiles on two layers.
+  const p = [];
+  p.push(...rect(0, 0, 8, 0, 5)); // 54
+  p.push(...rect(1, 2, 7, 1, 3)); // 18
+  return p;
+}
+
+const LAYOUTS = {
+  turtle: { name: 'Turtle', positions: turtle() },
+  pyramid: { name: 'Pyramid', positions: pyramid() },
+  starter: { name: 'Starter', positions: rows() },
+};
+
+// ---------- Freedom rules ----------
+function isFree(tile, tiles) {
+  let left = false, right = false;
+  for (const o of tiles) {
+    if (o === tile || o.removed) continue;
+    if (o.z === tile.z + 1 && Math.abs(o.x - tile.x) < 2 && Math.abs(o.y - tile.y) < 2) return false;
+    if (o.z === tile.z && Math.abs(o.y - tile.y) < 2) {
+      if (o.x === tile.x - 2) left = true;
+      else if (o.x === tile.x + 2) right = true;
+    }
+  }
+  return !(left && right);
+}
+
+function freeTiles(tiles) {
+  const live = tiles.filter((t) => !t.removed);
+  return live.filter((t) => isFree(t, live));
+}
+
+function findMoves(tiles) {
+  const free = freeTiles(tiles);
+  const moves = [];
+  for (let i = 0; i < free.length; i++)
+    for (let j = i + 1; j < free.length; j++)
+      if (facesMatch(free[i].face, free[j].face)) moves.push([free[i], free[j]]);
+  return moves;
+}
+
+// ---------- Solvable deal generation ----------
+// Simulates a full game: repeatedly pick two currently-free positions, give them a matching
+// pair, and remove them. Replaying those pairs in the same order always wins.
+function pairUp(faceIds, rng) {
+  const groups = new Map();
+  for (const id of faceIds) {
+    const k = FACES[id].match;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(id);
+  }
+  const pairs = [];
+  for (const g of groups.values()) {
+    const s = shuffle(g, rng);
+    for (let i = 0; i + 1 < s.length; i += 2) pairs.push([s[i], s[i + 1]]);
+  }
+  return shuffle(pairs, rng);
+}
+
+function dealOnto(positions, faceIds, rng) {
+  if (positions.length !== faceIds.length || positions.length % 2) throw new Error('size mismatch');
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const pairs = pairUp(faceIds, rng);
+    const tiles = positions.map((p, i) => ({ id: i, x: p.x, y: p.y, z: p.z, face: -1, removed: false }));
+    let ok = true;
+    const order = [];
+    for (const pair of pairs) {
+      const free = freeTiles(tiles);
+      if (free.length < 2) { ok = false; break; }
+      const [a, b] = shuffle(free, rng);
+      a.face = pair[0]; b.face = pair[1];
+      a.removed = b.removed = true;
+      order.push([a.id, b.id]);
+    }
+    if (ok) {
+      tiles.forEach((t) => (t.removed = false));
+      return { tiles, solution: order };
+    }
+  }
+  throw new Error('could not generate a solvable deal');
+}
+
+function newDeal(layoutKey, seed) {
+  const layout = LAYOUTS[layoutKey];
+  const rng = mulberry32(seed);
+  const n = layout.positions.length;
+  const set = shuffle(fullSet(), rng);
+  // Take whole matching groups so every face has a partner: pairs first, then trim.
+  const faceIds = [];
+  const pool = pairUp(fullSet(), rng);
+  for (let i = 0; i < n / 2; i++) faceIds.push(pool[i][0], pool[i][1]);
+  void set;
+  return dealOnto(layout.positions, faceIds, rng);
+}
+
+// Reshuffle the faces on remaining tiles; the result is still solvable.
+function reshuffle(tiles, seed) {
+  const live = tiles.filter((t) => !t.removed);
+  const rng = mulberry32(seed);
+  const { tiles: dealt } = dealOnto(live.map(({ x, y, z }) => ({ x, y, z })), live.map((t) => t.face), rng);
+  live.forEach((t, i) => (t.face = dealt[i].face));
+}
+
+
+const $ = (id) => document.getElementById(id);
+const board = $('board'), stage = $('stage'), dlg = $('dlg');
+
+let tiles = [], els = new Map(), selected = null, history = [], seed = 0, layoutKey = 'turtle';
+let startTime = 0, elapsed = 0, timerId = null, over = false, isDaily = false;
+
+// ---------- storage (safe) ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('mmecute.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('mmecute.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+};
+
+// ---------- setup ----------
+for (const [k, l] of Object.entries(LAYOUTS)) {
+  const o = document.createElement('option');
+  o.value = k; o.textContent = `${l.name} (${l.positions.length} tiles)`;
+  $('layout').append(o);
+}
+$('layout').value = store.get('layout', 'turtle');
+$('contrast').checked = store.get('contrast', false);
+document.body.classList.toggle('hc', $('contrast').checked);
+
+function todaySeed() {
+  const d = new Date();
+  return hashString(`mmecute-${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}-${layoutKey}`);
+}
+
+function startGame(daily) {
+  layoutKey = $('layout').value;
+  isDaily = daily;
+  seed = daily ? todaySeed() : (Math.random() * 2 ** 32) >>> 0;
+  ({ tiles } = newDeal(layoutKey, seed));
+  history = []; selected = null; over = false; elapsed = 0; startTime = Date.now();
+  buildBoard();
+  clearInterval(timerId);
+  timerId = setInterval(tick, 500);
+  tick();
+  refresh();
+}
+
+function tick() {
+  if (over) return;
+  elapsed = Math.floor((Date.now() - startTime) / 1000);
+  $('timer').textContent = fmt(elapsed);
+}
+const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+// ---------- rendering ----------
+let ux = 20;
+function buildBoard() {
+  board.innerHTML = '';
+  els.clear();
+  const minX = Math.min(...tiles.map((t) => t.x));
+  const maxX = Math.max(...tiles.map((t) => t.x)) - minX + 2;
+  const maxY = Math.max(...tiles.map((t) => t.y)) + 2;
+  const maxZ = Math.max(...tiles.map((t) => t.z));
+  const aspect = 1.3;
+  const pad = 12;
+  const availW = stage.clientWidth - pad * 2, availH = stage.clientHeight - pad * 2;
+  ux = Math.max(8, Math.min(availW / (maxX + maxZ * 0.35), availH / ((maxY + maxZ * 0.35) * aspect)));
+  const uy = ux * aspect;
+  const off = ux * 0.3; // per-layer offset
+  board.style.width = `${maxX * ux + maxZ * off}px`;
+  board.style.height = `${maxY * uy + maxZ * off}px`;
+
+  const order = [...tiles].sort((a, b) => a.z - b.z || a.y - b.y || a.x - b.x);
+  order.forEach((t, i) => {
+    const f = FACES[t.face];
+    const el = document.createElement('div');
+    el.className = `tile ${f.suit}`;
+    el.style.left = `${(t.x - minX) * ux + t.z * off}px`;
+    el.style.top = `${t.y * uy - t.z * off + maxZ * off}px`;
+    el.style.width = `${2 * ux}px`;
+    el.style.height = `${2 * uy}px`;
+    el.style.zIndex = String(i);
+    el.style.setProperty('--fs', `${ux * (f.sub ? 1.15 : 1.5)}px`);
+    el.style.setProperty('--d', `${Math.max(2, ux * 0.18)}px`);
+    el.innerHTML = `<span class="big">${f.label}</span>${f.sub ? `<span class="small">${f.sub}</span>` : ''}`;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', `${f.suit} ${f.label}`);
+    el.addEventListener('click', () => onTile(t));
+    board.append(el);
+    els.set(t.id, el);
+  });
+}
+
+function refresh() {
+  const live = tiles.filter((t) => !t.removed);
+  const free = new Set(live.filter((t) => isFree(t, live)).map((t) => t.id));
+  for (const t of live) els.get(t.id).classList.toggle('blocked', !free.has(t.id));
+  $('left').textContent = live.length;
+  $('undo').disabled = history.length === 0;
+  if (!live.length) return win();
+  if (findMoves(tiles).length === 0) noMoves();
+}
+
+function clearHints() { els.forEach((e) => e.classList.remove('hint')); }
+
+// ---------- interaction ----------
+function onTile(t) {
+  if (over || t.removed) return;
+  clearHints();
+  const live = tiles.filter((x) => !x.removed);
+  if (!isFree(t, live)) { wobble(t); return; }
+  if (selected === t) { select(null); return; }
+  if (selected && facesMatch(selected.face, t.face)) {
+    removePair(selected, t);
+    return;
+  }
+  select(t);
+}
+
+function select(t) {
+  if (selected) els.get(selected.id).classList.remove('selected');
+  selected = t;
+  if (t) els.get(t.id).classList.add('selected');
+}
+
+function wobble(t) {
+  const e = els.get(t.id);
+  e.animate([{ transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' }, { transform: 'none' }], { duration: 200 });
+}
+
+function removePair(a, b) {
+  select(null);
+  a.removed = b.removed = true;
+  history.push([a, b]);
+  for (const t of [a, b]) {
+    const e = els.get(t.id);
+    e.classList.add('gone');
+  }
+  refresh();
+}
+
+$('undo').onclick = () => {
+  const last = history.pop();
+  if (!last || over) return;
+  for (const t of last) { t.removed = false; els.get(t.id).classList.remove('gone'); }
+  clearHints(); refresh();
+};
+
+$('hint').onclick = () => {
+  clearHints();
+  const m = findMoves(tiles)[0];
+  if (m) m.forEach((t) => els.get(t.id).classList.add('hint'));
+};
+
+$('shuffle').onclick = () => {
+  if (over) return;
+  reshuffle(tiles, (Math.random() * 2 ** 32) >>> 0);
+  history = [];
+  select(null);
+  buildBoard();
+  tiles.filter((t) => t.removed).forEach((t) => els.get(t.id).classList.add('gone'));
+  refresh();
+};
+
+// ---------- end states & menus ----------
+function win() {
+  over = true; clearInterval(timerId);
+  const key = `best.${layoutKey}`;
+  const best = store.get(key, null);
+  const isBest = best == null || elapsed < best;
+  if (isBest) store.set(key, elapsed);
+  openDialog('You cleared the board!', `Time ${fmt(elapsed)}${isBest ? ' — a new best!' : ''}`);
+}
+
+function noMoves() {
+  openDialog('No more moves', 'Try Undo or Shuffle, or start a new game.');
+}
+
+function openDialog(title, msg) {
+  $('dlgTitle').textContent = title;
+  $('dlgMsg').textContent = msg;
+  const b = store.get(`best.${layoutKey}`, null);
+  $('best').textContent = b == null ? '' : `Best on this layout: ${fmt(b)}`;
+  if (!dlg.open) dlg.showModal();
+}
+
+$('menu').onclick = () => openDialog('New game', '');
+$('layout').onchange = () => store.set('layout', $('layout').value);
+$('contrast').onchange = () => {
+  store.set('contrast', $('contrast').checked);
+  document.body.classList.toggle('hc', $('contrast').checked);
+};
+$('daily').onclick = () => startGame(true);
+$('random').onclick = () => startGame(false);
+
+let rt;
+addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => {
+    buildBoard();
+    tiles.filter((t) => t.removed).forEach((t) => els.get(t.id).classList.add('gone'));
+    if (selected) els.get(selected.id).classList.add('selected');
+  }, 150);
+});
+
+
+startGame(false);
+void freeTiles; void isDaily;
+
+</script>
+</body>
+</html>
